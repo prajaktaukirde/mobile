@@ -44,19 +44,22 @@ async function secureGet(key: string): Promise<string | null> {
 }
 
 async function secureDelete(key: string): Promise<void> {
+  delete memoryStore[key];
   if (Platform.OS === 'web') {
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
         window.localStorage.removeItem(key);
-        return;
       }
     } catch {
       // ignore
     }
-    delete memoryStore[key];
     return;
   }
-  await SecureStore.deleteItemAsync(key);
+  try {
+    await SecureStore.deleteItemAsync(key);
+  } catch {
+    // ignore
+  }
 }
 
 export interface UserAuthProfile {
@@ -161,10 +164,18 @@ export class AuthService {
    * Clear all credentials and reset app state
    */
   static async resetAll(): Promise<void> {
-    await secureDelete(STORAGE_KEYS.USER_PIN_HASH);
-    await secureDelete(STORAGE_KEYS.USER_PASSWORD_HASH);
-    await secureDelete(STORAGE_KEYS.USER_PATTERN_HASH);
-    await secureDelete(STORAGE_KEYS.IS_CONFIGURED);
-    await secureDelete(STORAGE_KEYS.USER_NAME);
+    for (const key of Object.values(STORAGE_KEYS)) {
+      await secureDelete(key);
+    }
+    await secureDelete('auth_biometric_enabled');
+    if (Platform.OS === 'web') {
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.clear();
+        }
+      } catch {
+        // ignore
+      }
+    }
   }
 }

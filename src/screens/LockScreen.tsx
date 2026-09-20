@@ -8,8 +8,8 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Alert,
   ScrollView,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
@@ -107,21 +107,19 @@ export const LockScreen: React.FC = () => {
     }
   };
 
-  const handleForgotOrReset = () => {
-    Alert.alert(
-      'Reset Authentication?',
-      'If you forgot your credentials, you can reset the app. This will clear all stored credentials.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Reset App',
-          style: 'destructive',
-          onPress: async () => {
-            await resetApp();
-          },
-        },
-      ]
-    );
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+
+  const handleConfirmReset = async () => {
+    try {
+      setIsResetting(true);
+      await resetApp();
+      setShowForgotModal(false);
+    } catch (err) {
+      console.error('Reset error:', err);
+    } finally {
+      setIsResetting(false);
+    }
   };
 
   return (
@@ -286,10 +284,56 @@ export const LockScreen: React.FC = () => {
         )}
 
         {/* Forgot / Reset link */}
-        <TouchableOpacity style={styles.forgotButton} onPress={handleForgotOrReset}>
+        <TouchableOpacity
+          style={styles.forgotButton}
+          onPress={() => setShowForgotModal(true)}
+          activeOpacity={0.7}
+        >
           <Text style={styles.forgotText}>Forgot PIN, Pattern, or Password?</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Confirmation Modal */}
+      <Modal
+        visible={showForgotModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowForgotModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalIconWrap}>
+              <Ionicons name="warning-outline" size={36} color="#ef4444" />
+            </View>
+            <Text style={styles.modalTitle}>Reset Authentication?</Text>
+            <Text style={styles.modalMessage}>
+              If you forgot your credentials, you can reset the app. This will clear all stored credentials and return to the initial setup screen.
+            </Text>
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setShowForgotModal(false)}
+                disabled={isResetting}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalConfirmBtn}
+                onPress={handleConfirmReset}
+                disabled={isResetting}
+              >
+                {isResetting ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <Text style={styles.modalConfirmText}>Yes, Reset All</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 };
@@ -438,5 +482,79 @@ const styles = StyleSheet.create({
     color: '#94a3b8',
     fontSize: 13,
     textDecorationLine: 'underline',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  modalIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#fee2e2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 19,
+    fontWeight: '700',
+    color: '#0f172a',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  modalMessage: {
+    fontSize: 14,
+    color: '#64748b',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  modalCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#f1f5f9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCancelText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  modalConfirmBtn: {
+    flex: 1.2,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalConfirmText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#ffffff',
   },
 });

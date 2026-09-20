@@ -1,11 +1,12 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  Alert,
+  Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
@@ -18,21 +19,19 @@ export const HomeScreen: React.FC = () => {
     resetApp,
   } = useAuth();
 
-  const handleReset = () => {
-    Alert.alert(
-      'Reset All Credentials',
-      'This will delete your PIN, Password, and Pattern. You will return to the initial setup screen.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Reset App',
-          style: 'destructive',
-          onPress: async () => {
-            await resetApp();
-          },
-        },
-      ]
-    );
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+
+  const handleConfirmReset = async () => {
+    try {
+      setIsResetting(true);
+      await resetApp();
+      setShowConfirmModal(false);
+    } catch (err) {
+      console.error('Reset error:', err);
+    } finally {
+      setIsResetting(false);
+    }
   };
 
   const getMethodBadge = () => {
@@ -82,15 +81,15 @@ export const HomeScreen: React.FC = () => {
         <Text style={styles.greeting}>Welcome, {userProfile.name}!</Text>
         <Text style={styles.subgreeting}>Your application session is active and secure.</Text>
 
-        <TouchableOpacity style={styles.lockNowButton} onPress={logout}>
+        <TouchableOpacity style={styles.lockNowButton} onPress={logout} activeOpacity={0.7}>
           <Ionicons name="lock-closed-outline" size={18} color="#0284c7" />
-          <Text style={styles.lockNowText}>Lock App Now</Text>
+          <Text style={styles.lockNowText}>Lock / Log Out</Text>
         </TouchableOpacity>
       </View>
 
       {/* Security Status Overview */}
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Active Authentication Methods</Text>
+        <Text style={styles.sectionTitle}>Configured Authentication Methods</Text>
       </View>
 
       <View style={styles.card}>
@@ -104,8 +103,19 @@ export const HomeScreen: React.FC = () => {
             <Text style={styles.settingSubtitle}>4-digit numeric dial code</Text>
           </View>
           <View style={styles.activeTag}>
-            <Ionicons name="checkmark-circle" size={20} color="#10b981" />
-            <Text style={styles.activeTagText}>Active</Text>
+            <Ionicons
+              name={userProfile.hasPin ? 'checkmark-circle' : 'close-circle'}
+              size={20}
+              color={userProfile.hasPin ? '#10b981' : '#94a3b8'}
+            />
+            <Text
+              style={[
+                styles.activeTagText,
+                { color: userProfile.hasPin ? '#10b981' : '#94a3b8' },
+              ]}
+            >
+              {userProfile.hasPin ? 'Active' : 'Not Set'}
+            </Text>
           </View>
         </View>
 
@@ -121,8 +131,19 @@ export const HomeScreen: React.FC = () => {
             <Text style={styles.settingSubtitle}>3x3 connected dot gesture</Text>
           </View>
           <View style={styles.activeTag}>
-            <Ionicons name="checkmark-circle" size={20} color="#10b981" />
-            <Text style={styles.activeTagText}>Active</Text>
+            <Ionicons
+              name={userProfile.hasPattern ? 'checkmark-circle' : 'close-circle'}
+              size={20}
+              color={userProfile.hasPattern ? '#10b981' : '#94a3b8'}
+            />
+            <Text
+              style={[
+                styles.activeTagText,
+                { color: userProfile.hasPattern ? '#10b981' : '#94a3b8' },
+              ]}
+            >
+              {userProfile.hasPattern ? 'Active' : 'Not Set'}
+            </Text>
           </View>
         </View>
 
@@ -138,8 +159,19 @@ export const HomeScreen: React.FC = () => {
             <Text style={styles.settingSubtitle}>Alphanumeric with SHA-256 hash</Text>
           </View>
           <View style={styles.activeTag}>
-            <Ionicons name="checkmark-circle" size={20} color="#10b981" />
-            <Text style={styles.activeTagText}>Active</Text>
+            <Ionicons
+              name={userProfile.hasPassword ? 'checkmark-circle' : 'close-circle'}
+              size={20}
+              color={userProfile.hasPassword ? '#10b981' : '#94a3b8'}
+            />
+            <Text
+              style={[
+                styles.activeTagText,
+                { color: userProfile.hasPassword ? '#10b981' : '#94a3b8' },
+              ]}
+            >
+              {userProfile.hasPassword ? 'Active' : 'Not Set'}
+            </Text>
           </View>
         </View>
       </View>
@@ -155,8 +187,8 @@ export const HomeScreen: React.FC = () => {
           <Text style={styles.infoValue}>SHA-256 + Salt</Text>
         </View>
         <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Secure Storage</Text>
-          <Text style={styles.infoValue}>Hardware Keystore / Keychain</Text>
+          <Text style={styles.infoLabel}>Encrypted Storage</Text>
+          <Text style={styles.infoValue}>Keystore / Keychain (Local)</Text>
         </View>
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Pattern Minimum Length</Text>
@@ -164,11 +196,57 @@ export const HomeScreen: React.FC = () => {
         </View>
       </View>
 
-      {/* Reset credentials */}
-      <TouchableOpacity style={styles.resetButton} onPress={handleReset}>
+      {/* Danger Zone: Reset Button */}
+      <TouchableOpacity
+        style={styles.resetButton}
+        onPress={() => setShowConfirmModal(true)}
+        activeOpacity={0.7}
+      >
         <Ionicons name="trash-outline" size={20} color="#ef4444" />
         <Text style={styles.resetButtonText}>Reset All Credentials & Log Out</Text>
       </TouchableOpacity>
+
+      {/* Confirmation Dialog Modal (100% cross-platform on web and mobile) */}
+      <Modal
+        visible={showConfirmModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowConfirmModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalIconWrap}>
+              <Ionicons name="warning-outline" size={36} color="#ef4444" />
+            </View>
+            <Text style={styles.modalTitle}>Reset All Credentials?</Text>
+            <Text style={styles.modalMessage}>
+              This will permanently delete your stored PIN, Pattern, and Password. You will be logged out and returned to the initial setup screen.
+            </Text>
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setShowConfirmModal(false)}
+                disabled={isResetting}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalConfirmBtn}
+                onPress={handleConfirmReset}
+                disabled={isResetting}
+              >
+                {isResetting ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <Text style={styles.modalConfirmText}>Yes, Reset All</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 };
@@ -325,5 +403,79 @@ const styles = StyleSheet.create({
     color: '#ef4444',
     fontSize: 15,
     fontWeight: '600',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  modalIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#fee2e2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 19,
+    fontWeight: '700',
+    color: '#0f172a',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  modalMessage: {
+    fontSize: 14,
+    color: '#64748b',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  modalCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#f1f5f9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCancelText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  modalConfirmBtn: {
+    flex: 1.2,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalConfirmText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#ffffff',
   },
 });
