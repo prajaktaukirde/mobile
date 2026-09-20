@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -9,45 +9,29 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { PinKeypad } from '../components/PinKeypad';
+import { PatternLock } from '../components/PatternLock';
 
 export const LockScreen: React.FC = () => {
   const {
     userProfile,
-    biometricStatus,
     loginWithPin,
     loginWithPassword,
-    loginWithBiometrics,
+    loginWithPattern,
     resetApp,
   } = useAuth();
 
-  const [mode, setMode] = useState<'pin' | 'password'>('pin');
+  const [activeTab, setActiveTab] = useState<'pin' | 'pattern' | 'password'>('pin');
   const [pin, setPin] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
-
-  // Auto trigger biometrics when LockScreen loads if enabled
-  useEffect(() => {
-    if (userProfile.biometricEnabled && biometricStatus.hasHardware && biometricStatus.isEnrolled) {
-      handleBiometricUnlock();
-    }
-  }, []);
-
-  const handleBiometricUnlock = async () => {
-    setError(null);
-    setIsVerifying(true);
-    const result = await loginWithBiometrics();
-    setIsVerifying(false);
-    if (!result.success && result.error) {
-      // If user cancelled, don't show an intrusive alert, just display error hint
-      setError(result.error);
-    }
-  };
+  const [patternResetKey, setPatternResetKey] = useState(0);
 
   const handleDigitPress = async (digit: string) => {
     if (isVerifying) return;
@@ -75,9 +59,28 @@ export const LockScreen: React.FC = () => {
     setPin((prev) => prev.slice(0, -1));
   };
 
+  const handleClearPin = () => {
+    setError(null);
+    setPin('');
+  };
+
+  const handlePatternComplete = async (drawnPattern: number[]) => {
+    if (isVerifying) return;
+    setError(null);
+    setIsVerifying(true);
+    const result = await loginWithPattern(drawnPattern);
+    setIsVerifying(false);
+    if (!result.success) {
+      setError(result.error || 'Incorrect pattern');
+      setTimeout(() => {
+        setPatternResetKey((k) => k + 1);
+      }, 700);
+    }
+  };
+
   const handlePasswordSubmit = async () => {
     if (!password) {
-      setError('Please enter your password.');
+      setError('Please enter your character password.');
       return;
     }
     setError(null);
@@ -85,14 +88,14 @@ export const LockScreen: React.FC = () => {
     const result = await loginWithPassword(password);
     setIsVerifying(false);
     if (!result.success) {
-      setError(result.error || 'Incorrect Password');
+      setError(result.error || 'Incorrect password');
     }
   };
 
   const handleForgotOrReset = () => {
     Alert.alert(
       'Reset Authentication?',
-      'If you forgot your PIN and Password, you can reset the app. This will clear all stored credentials.',
+      'If you forgot your PIN, Pattern, or Password, you can reset the app. This will clear stored credentials.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -111,126 +114,155 @@ export const LockScreen: React.FC = () => {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={styles.header}>
-        <View style={styles.lockIconWrap}>
-          <Ionicons name="lock-closed" size={36} color="#0284c7" />
+      <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
+        {/* Header */}
+        <View style={styles.header}>
+          <View style={styles.lockIconWrap}>
+            <Ionicons name="lock-closed" size={32} color="#0284c7" />
+          </View>
+          <Text style={styles.welcomeText}>Welcome back, {userProfile.name}</Text>
+          <Text style={styles.subtitleText}>Choose your unlock method below</Text>
         </View>
-        <Text style={styles.welcomeText}>Welcome back, {userProfile.name}</Text>
-        <Text style={styles.subtitleText}>
-          {mode === 'pin' ? 'Enter your 4-digit PIN to unlock' : 'Enter your password to unlock'}
-        </Text>
-      </View>
 
-      {/* Main Mode View */}
-      {mode === 'pin' ? (
-        <View style={styles.pinSection}>
-          <PinKeypad
-            pin={pin}
-            pinLength={4}
-            onDigitPress={handleDigitPress}
-            onBackspacePress={handleBackspacePress}
-            onBiometricPress={handleBiometricUnlock}
-            showBiometricButton={userProfile.biometricEnabled && biometricStatus.hasHardware}
-            biometricType={biometricStatus.primaryType}
-            error={error}
-          />
-
-          {/* Quick Biometric Button below keypad if enabled */}
-          {userProfile.biometricEnabled && biometricStatus.hasHardware && (
-            <TouchableOpacity
-              style={styles.biometricBarButton}
-              activeOpacity={0.7}
-              onPress={handleBiometricUnlock}
-            >
-              <Ionicons
-                name={biometricStatus.primaryType === 'face' ? 'scan' : 'finger-print'}
-                size={22}
-                color="#0284c7"
-              />
-              <Text style={styles.biometricBarText}>
-                Unlock with {biometricStatus.supportedTypes[0] || 'Biometrics'}
-              </Text>
-            </TouchableOpacity>
-          )}
-
-          {/* Toggle to Password */}
+        {/* Method Switcher Tabs */}
+        <View style={styles.tabContainer}>
           <TouchableOpacity
-            style={styles.modeToggle}
+            style={[styles.tabButton, activeTab === 'pin' && styles.tabButtonActive]}
             onPress={() => {
-              setMode('password');
+              setActiveTab('pin');
               setError(null);
-              setPin('');
             }}
           >
-            <Ionicons name="key-outline" size={16} color="#0284c7" />
-            <Text style={styles.modeToggleText}>Use Password Instead</Text>
+            <Ionicons
+              name="keypad-outline"
+              size={18}
+              color={activeTab === 'pin' ? '#ffffff' : '#64748b'}
+            />
+            <Text style={[styles.tabButtonText, activeTab === 'pin' && styles.tabButtonTextActive]}>
+              PIN
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.tabButton, activeTab === 'pattern' && styles.tabButtonActive]}
+            onPress={() => {
+              setActiveTab('pattern');
+              setError(null);
+              setPatternResetKey((k) => k + 1);
+            }}
+          >
+            <Ionicons
+              name="grid-outline"
+              size={18}
+              color={activeTab === 'pattern' ? '#ffffff' : '#64748b'}
+            />
+            <Text
+              style={[styles.tabButtonText, activeTab === 'pattern' && styles.tabButtonTextActive]}
+            >
+              Pattern
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.tabButton, activeTab === 'password' && styles.tabButtonActive]}
+            onPress={() => {
+              setActiveTab('password');
+              setError(null);
+            }}
+          >
+            <Ionicons
+              name="text-outline"
+              size={18}
+              color={activeTab === 'password' ? '#ffffff' : '#64748b'}
+            />
+            <Text
+              style={[styles.tabButtonText, activeTab === 'password' && styles.tabButtonTextActive]}
+            >
+              Password
+            </Text>
           </TouchableOpacity>
         </View>
-      ) : (
-        /* Password Mode */
-        <View style={styles.passwordSection}>
-          <View style={styles.card}>
-            <Text style={styles.inputLabel}>Password</Text>
-            <View style={styles.inputWrapper}>
-              <Ionicons name="lock-closed-outline" size={20} color="#64748b" style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="Enter your password"
-                placeholderTextColor="#94a3b8"
-                secureTextEntry={!showPassword}
-                value={password}
-                onChangeText={(text) => {
-                  setPassword(text);
-                  setError(null);
-                }}
-                onSubmitEditing={handlePasswordSubmit}
-              />
-              <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-                <Ionicons
-                  name={showPassword ? 'eye-off-outline' : 'eye-outline'}
-                  size={20}
-                  color="#64748b"
+
+        {/* Tab 1: Numeric PIN */}
+        {activeTab === 'pin' && (
+          <View style={styles.methodSection}>
+            <PinKeypad
+              pin={pin}
+              pinLength={4}
+              onDigitPress={handleDigitPress}
+              onBackspacePress={handleBackspacePress}
+              onClearPress={handleClearPin}
+              error={error}
+            />
+          </View>
+        )}
+
+        {/* Tab 2: Pattern Lock */}
+        {activeTab === 'pattern' && (
+          <View style={styles.methodSection}>
+            <PatternLock
+              key={patternResetKey}
+              size={280}
+              onPatternComplete={handlePatternComplete}
+              error={error}
+              disabled={isVerifying}
+            />
+          </View>
+        )}
+
+        {/* Tab 3: Character Password */}
+        {activeTab === 'password' && (
+          <View style={styles.passwordSection}>
+            <View style={styles.card}>
+              <Text style={styles.inputLabel}>Character Password</Text>
+              <View style={styles.inputWrapper}>
+                <Ionicons name="lock-closed-outline" size={20} color="#64748b" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter your password"
+                  placeholderTextColor="#94a3b8"
+                  secureTextEntry={!showPassword}
+                  value={password}
+                  onChangeText={(text) => {
+                    setPassword(text);
+                    setError(null);
+                  }}
+                  onSubmitEditing={handlePasswordSubmit}
                 />
+                <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+                  <Ionicons
+                    name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                    size={20}
+                    color="#64748b"
+                  />
+                </TouchableOpacity>
+              </View>
+
+              {error && <Text style={styles.passwordError}>{error}</Text>}
+
+              <TouchableOpacity
+                style={styles.primaryButton}
+                onPress={handlePasswordSubmit}
+                disabled={isVerifying}
+              >
+                {isVerifying ? (
+                  <ActivityIndicator color="#ffffff" />
+                ) : (
+                  <>
+                    <Text style={styles.primaryButtonText}>Unlock</Text>
+                    <Ionicons name="arrow-forward" size={18} color="#ffffff" />
+                  </>
+                )}
               </TouchableOpacity>
             </View>
-
-            {error && <Text style={styles.passwordError}>{error}</Text>}
-
-            <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={handlePasswordSubmit}
-              disabled={isVerifying}
-            >
-              {isVerifying ? (
-                <ActivityIndicator color="#ffffff" />
-              ) : (
-                <>
-                  <Text style={styles.primaryButtonText}>Unlock</Text>
-                  <Ionicons name="arrow-forward" size={18} color="#ffffff" />
-                </>
-              )}
-            </TouchableOpacity>
           </View>
+        )}
 
-          {/* Switch back to PIN */}
-          <TouchableOpacity
-            style={styles.modeToggle}
-            onPress={() => {
-              setMode('pin');
-              setError(null);
-              setPassword('');
-            }}
-          >
-            <Ionicons name="keypad-outline" size={16} color="#0284c7" />
-            <Text style={styles.modeToggleText}>Use PIN Instead</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Forgot / Reset option */}
-      <TouchableOpacity style={styles.forgotButton} onPress={handleForgotOrReset}>
-        <Text style={styles.forgotText}>Forgot PIN or Password?</Text>
-      </TouchableOpacity>
+        {/* Forgot / Reset link */}
+        <TouchableOpacity style={styles.forgotButton} onPress={handleForgotOrReset}>
+          <Text style={styles.forgotText}>Forgot PIN, Pattern, or Password?</Text>
+        </TouchableOpacity>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 };
@@ -239,57 +271,80 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f1f5f9',
+  },
+  scrollContainer: {
+    flexGrow: 1,
     justifyContent: 'space-between',
-    paddingHorizontal: 24,
-    paddingVertical: 40,
+    paddingHorizontal: 20,
+    paddingVertical: 36,
   },
   header: {
     alignItems: 'center',
-    marginTop: 10,
+    marginTop: 6,
   },
   lockIconWrap: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     backgroundColor: '#e0f2fe',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   welcomeText: {
     fontSize: 22,
     fontWeight: '700',
     color: '#0f172a',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   subtitleText: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#64748b',
     textAlign: 'center',
   },
-  pinSection: {
-    alignItems: 'center',
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#e2e8f0',
+    borderRadius: 12,
+    padding: 4,
+    marginVertical: 16,
+    alignSelf: 'center',
     width: '100%',
+    maxWidth: 320,
   },
-  biometricBarButton: {
+  tabButton: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#e0f2fe',
-    paddingVertical: 10,
-    paddingHorizontal: 18,
-    borderRadius: 20,
-    marginTop: 4,
-    marginBottom: 12,
-    gap: 8,
+    paddingVertical: 9,
+    borderRadius: 9,
+    gap: 6,
   },
-  biometricBarText: {
-    color: '#0284c7',
-    fontSize: 14,
+  tabButtonActive: {
+    backgroundColor: '#0284c7',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  tabButtonText: {
+    fontSize: 13,
     fontWeight: '600',
+    color: '#64748b',
+  },
+  tabButtonTextActive: {
+    color: '#ffffff',
+  },
+  methodSection: {
+    alignItems: 'center',
+    width: '100%',
   },
   passwordSection: {
     width: '100%',
+    maxWidth: 340,
+    alignSelf: 'center',
     paddingVertical: 10,
   },
   card: {
@@ -348,21 +403,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  modeToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-    gap: 6,
-  },
-  modeToggleText: {
-    color: '#0284c7',
-    fontSize: 14,
-    fontWeight: '600',
-  },
   forgotButton: {
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: 12,
   },
   forgotText: {
     color: '#94a3b8',

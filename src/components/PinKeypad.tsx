@@ -7,9 +7,7 @@ interface PinKeypadProps {
   pinLength?: number;
   onDigitPress: (digit: string) => void;
   onBackspacePress: () => void;
-  onBiometricPress?: () => void;
-  showBiometricButton?: boolean;
-  biometricType?: 'face' | 'fingerprint' | 'iris' | 'none';
+  onClearPress?: () => void;
   error?: string | null;
 }
 
@@ -18,9 +16,7 @@ export const PinKeypad: React.FC<PinKeypadProps> = ({
   pinLength = 4,
   onDigitPress,
   onBackspacePress,
-  onBiometricPress,
-  showBiometricButton = false,
-  biometricType = 'fingerprint',
+  onClearPress,
   error = null,
 }) => {
   const digits = [
@@ -31,7 +27,7 @@ export const PinKeypad: React.FC<PinKeypadProps> = ({
 
   return (
     <View style={styles.container}>
-      {/* PIN Dots Display */}
+      {/* Masked PIN Dots Indicator */}
       <View style={styles.dotsContainer}>
         {Array.from({ length: pinLength }).map((_, index) => {
           const isFilled = index < pin.length;
@@ -68,20 +64,16 @@ export const PinKeypad: React.FC<PinKeypadProps> = ({
           </View>
         ))}
 
-        {/* Bottom row: Biometric / Empty, 0, Backspace */}
+        {/* Bottom row: Clear, 0, Backspace */}
         <View style={styles.row}>
-          {/* Left button: Biometric shortcut if available */}
-          {showBiometricButton && onBiometricPress ? (
+          {/* Left: Clear button if pin has digits */}
+          {pin.length > 0 && onClearPress ? (
             <TouchableOpacity
               style={[styles.key, styles.specialKey]}
               activeOpacity={0.65}
-              onPress={onBiometricPress}
+              onPress={onClearPress}
             >
-              <Ionicons
-                name={biometricType === 'face' ? 'scan-outline' : 'finger-print-outline'}
-                size={28}
-                color="#0284c7"
-              />
+              <Text style={styles.clearText}>C</Text>
             </TouchableOpacity>
           ) : (
             <View style={styles.emptyKey} />
@@ -96,7 +88,7 @@ export const PinKeypad: React.FC<PinKeypadProps> = ({
             <Text style={styles.keyText}>0</Text>
           </TouchableOpacity>
 
-          {/* Right button: Backspace */}
+          {/* Right: Backspace */}
           <TouchableOpacity
             style={[styles.key, styles.specialKey]}
             activeOpacity={0.65}
@@ -190,5 +182,10 @@ const styles = StyleSheet.create({
     fontSize: 26,
     fontWeight: '600',
     color: '#0f172a',
+  },
+  clearText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#64748b',
   },
 });

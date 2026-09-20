@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  Switch,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -14,9 +13,10 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { PinKeypad } from '../components/PinKeypad';
+import { PatternLock } from '../components/PatternLock';
 
 export const SetupScreen: React.FC = () => {
-  const { biometricStatus, register } = useAuth();
+  const { register } = useAuth();
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [name, setName] = useState('');
@@ -30,18 +30,19 @@ export const SetupScreen: React.FC = () => {
   const [isConfirmingPin, setIsConfirmingPin] = useState(false);
   const [pinError, setPinError] = useState<string | null>(null);
 
-  // Biometrics
-  const [enableBiometrics, setEnableBiometrics] = useState(
-    biometricStatus.hasHardware && biometricStatus.isEnrolled
-  );
+  // Pattern state
+  const [pattern, setPattern] = useState<number[]>([]);
+  const [isConfirmingPattern, setIsConfirmingPattern] = useState(false);
+  const [patternError, setPatternError] = useState<string | null>(null);
+  const [patternKey, setPatternKey] = useState(0); // to force reset component on retry
 
   const handleStep1Submit = () => {
     if (!password || password.length < 6) {
-      Alert.alert('Invalid Password', 'Password must be at least 6 characters long.');
+      Alert.alert('Password too short', 'Password must contain at least 6 characters.');
       return;
     }
     if (password !== confirmPassword) {
-      Alert.alert('Mismatch', 'Passwords do not match. Please re-check.');
+      Alert.alert('Mismatch', 'Passwords do not match. Please re-type.');
       return;
     }
     setStep(2);
@@ -54,7 +55,6 @@ export const SetupScreen: React.FC = () => {
         const nextPin = pin + digit;
         setPin(nextPin);
         if (nextPin.length === 4) {
-          // Move to confirm PIN after a short delay
           setTimeout(() => {
             setIsConfirmingPin(true);
           }, 200);
@@ -66,7 +66,6 @@ export const SetupScreen: React.FC = () => {
         setConfirmedPin(nextConfirmed);
         if (nextConfirmed.length === 4) {
           if (pin === nextConfirmed) {
-            // Success! Move to Biometric step or complete
             setTimeout(() => {
               setStep(3);
             }, 250);
@@ -74,7 +73,7 @@ export const SetupScreen: React.FC = () => {
             setPinError('PINs do not match. Try again.');
             setTimeout(() => {
               setConfirmedPin('');
-            }, 800);
+            }, 700);
           }
         }
       }
@@ -90,17 +89,45 @@ export const SetupScreen: React.FC = () => {
     }
   };
 
-  const handleCompleteSetup = async () => {
+  const handlePatternComplete = (drawnPattern: number[]) => {
+    setPatternError(null);
+
+    if (drawnPattern.length < 4) {
+      setPatternError('Pattern must connect at least 4 dots');
+      setPatternKey((k) => k + 1);
+      return;
+    }
+
+    if (!isConfirmingPattern) {
+      setPattern(drawnPattern);
+      setIsConfirmingPattern(true);
+      setPatternKey((k) => k + 1);
+    } else {
+      // Compare drawnPattern with initial pattern
+      const matches =
+        drawnPattern.length === pattern.length &&
+        drawnPattern.every((dot, idx) => dot === pattern[idx]);
+
+      if (matches) {
+        handleFinishAllSetup(drawnPattern);
+      } else {
+        setPatternError('Pattern does not match. Draw your pattern again.');
+        setPatternKey((k) => k + 1);
+      }
+    }
+  };
+
+  const handleFinishAllSetup = async (finalPattern: number[]) => {
     try {
       await register({
         name: name.trim() || 'User',
         password,
         pin,
-        enableBiometrics: biometricStatus.hasHardware ? enableBiometrics : false,
+        pattern: finalPattern,
       });
-      Alert.alert('Success', 'Security credentials saved successfully!');
+      Alert.alert('Success', 'PIN, Password, and Pattern Lock configured successfully!');
     } catch (err: any) {
-      Alert.alert('Error', err?.message || 'Failed to save credentials.');
+      Alert.alert('Error', err?.message || 'Failed to save security settings.');
     }
   };
 
@@ -115,11 +142,11 @@ export const SetupScreen: React.FC = () => {
           <View style={styles.iconCircle}>
             <Ionicons name="shield-checkmark" size={40} color="#0284c7" />
           </View>
-          <Text style={styles.title}>Secure Setup</Text>
+          <Text style={styles.title}>Security Setup</Text>
           <Text style={styles.subtitle}>
-            {step === 1 && 'Step 1 of 3: Create your account password'}
-            {step === 2 && 'Step 2 of 3: Set up a 4-digit quick PIN'}
-            {step === 3 && 'Step 3 of 3: Configure biometric security'}
+            {step === 1 && 'Step 1 of 3: Character Password (alphanumeric)'}
+            {step === 2 && 'Step 2 of 3: Numeric 4-digit PIN'}
+            {step === 3 && 'Step 3 of 3: 3x3 Grid Pattern Lock'}
           </Text>
         </View>
 
@@ -130,7 +157,7 @@ export const SetupScreen: React.FC = () => {
           <View style={[styles.stepBar, step >= 3 && styles.stepBarActive]} />
         </View>
 
-        {/* STEP 1: Name & Password */}
+        {/* STEP 1: Name & Password (Characters) */}
         {step === 1 && (
           <View style={styles.card}>
             <Text style={styles.inputLabel}>Your Name (Optional)</Text>
@@ -145,12 +172,12 @@ export const SetupScreen: React.FC = () => {
               />
             </View>
 
-            <Text style={styles.inputLabel}>Master Password (min 6 chars)</Text>
+            <Text style={styles.inputLabel}>Character Password (min 6 chars)</Text>
             <View style={styles.inputWrapper}>
               <Ionicons name="lock-closed-outline" size={20} color="#64748b" style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
-                placeholder="Enter password"
+                placeholder="Letters, numbers & symbols"
                 placeholderTextColor="#94a3b8"
                 secureTextEntry={!showPassword}
                 value={password}
@@ -179,17 +206,17 @@ export const SetupScreen: React.FC = () => {
             </View>
 
             <TouchableOpacity style={styles.primaryButton} onPress={handleStep1Submit}>
-              <Text style={styles.primaryButtonText}>Continue to PIN Setup</Text>
+              <Text style={styles.primaryButtonText}>Continue to Numeric PIN</Text>
               <Ionicons name="arrow-forward" size={18} color="#ffffff" />
             </TouchableOpacity>
           </View>
         )}
 
-        {/* STEP 2: PIN Setup */}
+        {/* STEP 2: Numeric PIN */}
         {step === 2 && (
           <View style={styles.card}>
             <Text style={styles.pinInstruction}>
-              {isConfirmingPin ? 'Confirm your 4-digit PIN' : 'Enter a 4-digit PIN'}
+              {isConfirmingPin ? 'Confirm your 4-digit PIN' : 'Enter a 4-digit Numeric PIN'}
             </Text>
 
             <PinKeypad
@@ -210,7 +237,7 @@ export const SetupScreen: React.FC = () => {
                   setPinError(null);
                 }}
               >
-                <Text style={styles.textButtonLabel}>Start Over</Text>
+                <Text style={styles.textButtonLabel}>Reset PIN & Re-enter</Text>
               </TouchableOpacity>
             )}
 
@@ -229,46 +256,40 @@ export const SetupScreen: React.FC = () => {
           </View>
         )}
 
-        {/* STEP 3: Biometrics & Finish */}
+        {/* STEP 3: Pattern Lock */}
         {step === 3 && (
           <View style={styles.card}>
-            <View style={styles.biometricHeader}>
-              <View style={styles.bioIconWrap}>
-                <Ionicons
-                  name={biometricStatus.primaryType === 'face' ? 'scan' : 'finger-print'}
-                  size={36}
-                  color="#0284c7"
-                />
-              </View>
-              <Text style={styles.bioTitle}>Biometric Authentication</Text>
-              <Text style={styles.bioDescription}>
-                {biometricStatus.hasHardware
-                  ? biometricStatus.isEnrolled
-                    ? `Use ${biometricStatus.supportedTypes.join(' or ') || 'Biometrics'} to quickly and securely unlock your app.`
-                    : 'Biometric hardware detected, but no fingerprint/face is enrolled yet. You can enroll in device settings.'
-                  : 'No biometric hardware detected on this device. You can still use PIN and Password.'}
-              </Text>
-            </View>
+            <Text style={styles.pinInstruction}>
+              {isConfirmingPattern
+                ? 'Confirm Pattern (draw again)'
+                : 'Draw a Pattern (connect dots)'}
+            </Text>
+            <Text style={styles.patternSubhint}>
+              {isConfirmingPattern
+                ? 'Draw the exact same pattern to confirm'
+                : 'Swipe across 4 or more dots to create your pattern'}
+            </Text>
 
-            {biometricStatus.hasHardware && (
-              <View style={styles.switchRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.switchLabel}>Enable Biometric Unlock</Text>
-                  <Text style={styles.switchSubtext}>Unlock with Fingerprint / Face</Text>
-                </View>
-                <Switch
-                  value={enableBiometrics}
-                  onValueChange={setEnableBiometrics}
-                  trackColor={{ false: '#cbd5e1', true: '#bae6fd' }}
-                  thumbColor={enableBiometrics ? '#0284c7' : '#f8fafc'}
-                />
-              </View>
+            <PatternLock
+              key={patternKey}
+              size={270}
+              onPatternComplete={handlePatternComplete}
+              error={patternError}
+            />
+
+            {isConfirmingPattern && (
+              <TouchableOpacity
+                style={styles.textButton}
+                onPress={() => {
+                  setIsConfirmingPattern(false);
+                  setPattern([]);
+                  setPatternError(null);
+                  setPatternKey((k) => k + 1);
+                }}
+              >
+                <Text style={styles.textButtonLabel}>Start Pattern Over</Text>
+              </TouchableOpacity>
             )}
-
-            <TouchableOpacity style={styles.primaryButton} onPress={handleCompleteSetup}>
-              <Text style={styles.primaryButtonText}>Complete Setup</Text>
-              <Ionicons name="checkmark-circle" size={20} color="#ffffff" />
-            </TouchableOpacity>
 
             <TouchableOpacity style={styles.secondaryButton} onPress={() => setStep(2)}>
               <Ionicons name="arrow-back" size={18} color="#475569" />
@@ -294,22 +315,22 @@ const styles = StyleSheet.create({
   },
   headerContainer: {
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
   },
   iconCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 68,
+    height: 68,
+    borderRadius: 34,
     backgroundColor: '#e0f2fe',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: 12,
   },
   title: {
     fontSize: 24,
     fontWeight: '700',
     color: '#0f172a',
-    marginBottom: 6,
+    marginBottom: 4,
   },
   subtitle: {
     fontSize: 14,
@@ -321,7 +342,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 24,
+    marginBottom: 20,
   },
   stepBar: {
     width: 48,
@@ -335,7 +356,7 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: '#ffffff',
     borderRadius: 16,
-    padding: 24,
+    padding: 22,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.08,
@@ -398,10 +419,16 @@ const styles = StyleSheet.create({
   },
   pinInstruction: {
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: '700',
     color: '#1e293b',
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: 4,
+  },
+  patternSubhint: {
+    fontSize: 13,
+    color: '#64748b',
+    textAlign: 'center',
+    marginBottom: 12,
   },
   textButton: {
     alignItems: 'center',
@@ -412,51 +439,5 @@ const styles = StyleSheet.create({
     color: '#ef4444',
     fontSize: 14,
     fontWeight: '600',
-  },
-  biometricHeader: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  bioIconWrap: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: '#e0f2fe',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  bioTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#0f172a',
-    marginBottom: 6,
-  },
-  bioDescription: {
-    fontSize: 14,
-    color: '#64748b',
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  switchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#f8fafc',
-    padding: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    marginBottom: 12,
-  },
-  switchLabel: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#1e293b',
-  },
-  switchSubtext: {
-    fontSize: 12,
-    color: '#64748b',
-    marginTop: 2,
   },
 });

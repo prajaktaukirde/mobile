@@ -1,11 +1,10 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  Switch,
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,45 +14,18 @@ export const HomeScreen: React.FC = () => {
   const {
     userProfile,
     authMethodUsed,
-    biometricStatus,
-    toggleBiometrics,
     logout,
     resetApp,
   } = useAuth();
 
-  const [toggling, setToggling] = useState(false);
-
-  const handleBiometricToggle = async (value: boolean) => {
-    if (value && !biometricStatus.hasHardware) {
-      Alert.alert('Unavailable', 'No biometric sensor detected on this device.');
-      return;
-    }
-    if (value && !biometricStatus.isEnrolled) {
-      Alert.alert(
-        'Not Enrolled',
-        'Please enroll your fingerprint or face in your phone system settings first.'
-      );
-      return;
-    }
-
-    try {
-      setToggling(true);
-      await toggleBiometrics(value);
-    } catch (err: any) {
-      Alert.alert('Error', err?.message || 'Could not update biometric setting');
-    } finally {
-      setToggling(false);
-    }
-  };
-
   const handleReset = () => {
     Alert.alert(
       'Reset All Credentials',
-      'This will delete your PIN, Password, and Biometric preferences. You will return to the setup screen.',
+      'This will delete your PIN, Password, and Pattern. You will return to the initial setup screen.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Reset',
+          text: 'Reset App',
           style: 'destructive',
           onPress: async () => {
             await resetApp();
@@ -65,33 +37,33 @@ export const HomeScreen: React.FC = () => {
 
   const getMethodBadge = () => {
     switch (authMethodUsed) {
-      case 'biometric':
-        return {
-          icon: biometricStatus.primaryType === 'face' ? 'scan' : 'finger-print',
-          label: 'Biometrics (Face / Fingerprint)',
-          color: '#10b981',
-          bg: '#ecfdf5',
-        };
       case 'pin':
         return {
           icon: 'keypad',
-          label: '4-Digit PIN Code',
+          label: '4-Digit Numeric PIN',
           color: '#0284c7',
           bg: '#f0f9ff',
+        };
+      case 'pattern':
+        return {
+          icon: 'grid',
+          label: '3x3 Grid Pattern Lock',
+          color: '#10b981',
+          bg: '#ecfdf5',
         };
       case 'password':
         return {
           icon: 'lock-closed',
-          label: 'Master Password',
+          label: 'Character Password',
           color: '#8b5cf6',
           bg: '#f5f3ff',
         };
       default:
         return {
-          icon: 'checkmark-circle',
-          label: 'Authenticated',
-          color: '#10b981',
-          bg: '#ecfdf5',
+          icon: 'shield-checkmark',
+          label: 'Secure Authenticated Session',
+          color: '#0284c7',
+          bg: '#f0f9ff',
         };
     }
   };
@@ -100,15 +72,15 @@ export const HomeScreen: React.FC = () => {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* Top Banner */}
+      {/* Top Welcome Banner */}
       <View style={styles.topCard}>
         <View style={[styles.badge, { backgroundColor: badge.bg }]}>
-          <Ionicons name={badge.icon as any} size={20} color={badge.color} />
+          <Ionicons name={badge.icon as any} size={18} color={badge.color} />
           <Text style={[styles.badgeText, { color: badge.color }]}>{badge.label}</Text>
         </View>
 
         <Text style={styles.greeting}>Welcome, {userProfile.name}!</Text>
-        <Text style={styles.subgreeting}>Your session is secure and active.</Text>
+        <Text style={styles.subgreeting}>Your application session is active and secure.</Text>
 
         <TouchableOpacity style={styles.lockNowButton} onPress={logout}>
           <Ionicons name="lock-closed-outline" size={18} color="#0284c7" />
@@ -116,104 +88,83 @@ export const HomeScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
 
-      {/* Security & Authentication Overview */}
+      {/* Security Status Overview */}
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Security Settings</Text>
+        <Text style={styles.sectionTitle}>Active Authentication Methods</Text>
       </View>
 
       <View style={styles.card}>
-        {/* Biometric Toggle Row */}
-        <View style={styles.settingRow}>
-          <View style={styles.settingIcon}>
-            <Ionicons
-              name={biometricStatus.primaryType === 'face' ? 'scan' : 'finger-print'}
-              size={24}
-              color="#0284c7"
-            />
-          </View>
-          <View style={{ flex: 1, paddingHorizontal: 12 }}>
-            <Text style={styles.settingTitle}>Biometric Unlock</Text>
-            <Text style={styles.settingSubtitle}>
-              {biometricStatus.hasHardware
-                ? `Supported: ${biometricStatus.supportedTypes.join(', ') || 'Sensor available'}`
-                : 'No biometric hardware sensor'}
-            </Text>
-          </View>
-          <Switch
-            value={userProfile.biometricEnabled}
-            onValueChange={handleBiometricToggle}
-            disabled={toggling || !biometricStatus.hasHardware}
-            trackColor={{ false: '#cbd5e1', true: '#bae6fd' }}
-            thumbColor={userProfile.biometricEnabled ? '#0284c7' : '#f8fafc'}
-          />
-        </View>
-
-        <View style={styles.divider} />
-
-        {/* PIN Status */}
+        {/* Numeric PIN */}
         <View style={styles.settingRow}>
           <View style={styles.settingIcon}>
             <Ionicons name="keypad-outline" size={24} color="#0284c7" />
           </View>
           <View style={{ flex: 1, paddingHorizontal: 12 }}>
-            <Text style={styles.settingTitle}>Quick PIN Code</Text>
-            <Text style={styles.settingSubtitle}>Active (4 digits configured)</Text>
+            <Text style={styles.settingTitle}>Numeric PIN</Text>
+            <Text style={styles.settingSubtitle}>4-digit numeric dial code</Text>
           </View>
-          <Ionicons name="checkmark-circle" size={22} color="#10b981" />
+          <View style={styles.activeTag}>
+            <Ionicons name="checkmark-circle" size={20} color="#10b981" />
+            <Text style={styles.activeTagText}>Active</Text>
+          </View>
         </View>
 
         <View style={styles.divider} />
 
-        {/* Password Status */}
+        {/* Pattern Lock */}
         <View style={styles.settingRow}>
           <View style={styles.settingIcon}>
-            <Ionicons name="shield-checkmark-outline" size={24} color="#0284c7" />
+            <Ionicons name="grid-outline" size={24} color="#10b981" />
           </View>
           <View style={{ flex: 1, paddingHorizontal: 12 }}>
-            <Text style={styles.settingTitle}>Master Password</Text>
-            <Text style={styles.settingSubtitle}>Protected via SHA-256 hash</Text>
+            <Text style={styles.settingTitle}>Pattern Lock</Text>
+            <Text style={styles.settingSubtitle}>3x3 connected dot gesture</Text>
           </View>
-          <Ionicons name="checkmark-circle" size={22} color="#10b981" />
+          <View style={styles.activeTag}>
+            <Ionicons name="checkmark-circle" size={20} color="#10b981" />
+            <Text style={styles.activeTagText}>Active</Text>
+          </View>
+        </View>
+
+        <View style={styles.divider} />
+
+        {/* Character Password */}
+        <View style={styles.settingRow}>
+          <View style={styles.settingIcon}>
+            <Ionicons name="text-outline" size={24} color="#8b5cf6" />
+          </View>
+          <View style={{ flex: 1, paddingHorizontal: 12 }}>
+            <Text style={styles.settingTitle}>Character Password</Text>
+            <Text style={styles.settingSubtitle}>Alphanumeric with SHA-256 hash</Text>
+          </View>
+          <View style={styles.activeTag}>
+            <Ionicons name="checkmark-circle" size={20} color="#10b981" />
+            <Text style={styles.activeTagText}>Active</Text>
+          </View>
         </View>
       </View>
 
-      {/* Device Biometric Diagnostics */}
+      {/* Security Architecture Summary */}
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Device Hardware Diagnostics</Text>
+        <Text style={styles.sectionTitle}>Security Architecture</Text>
       </View>
 
       <View style={styles.card}>
         <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Hardware Sensor Available</Text>
-          <Text
-            style={[
-              styles.infoValue,
-              { color: biometricStatus.hasHardware ? '#10b981' : '#ef4444' },
-            ]}
-          >
-            {biometricStatus.hasHardware ? 'Yes' : 'No'}
-          </Text>
+          <Text style={styles.infoLabel}>Hashing Algorithm</Text>
+          <Text style={styles.infoValue}>SHA-256 + Salt</Text>
         </View>
         <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Biometrics Enrolled</Text>
-          <Text
-            style={[
-              styles.infoValue,
-              { color: biometricStatus.isEnrolled ? '#10b981' : '#f59e0b' },
-            ]}
-          >
-            {biometricStatus.isEnrolled ? 'Yes' : 'No'}
-          </Text>
+          <Text style={styles.infoLabel}>Secure Storage</Text>
+          <Text style={styles.infoValue}>Hardware Keystore / Keychain</Text>
         </View>
         <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Detected Sensor Type</Text>
-          <Text style={styles.infoValue}>
-            {biometricStatus.supportedTypes.join(', ') || 'None'}
-          </Text>
+          <Text style={styles.infoLabel}>Pattern Minimum Length</Text>
+          <Text style={styles.infoValue}>4 Connected Dots</Text>
         </View>
       </View>
 
-      {/* Danger Zone: Reset App */}
+      {/* Reset credentials */}
       <TouchableOpacity style={styles.resetButton} onPress={handleReset}>
         <Ionicons name="trash-outline" size={20} color="#ef4444" />
         <Text style={styles.resetButtonText}>Reset All Credentials & Log Out</Text>
@@ -326,6 +277,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#64748b',
     marginTop: 2,
+  },
+  activeTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  activeTagText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#10b981',
   },
   divider: {
     height: 1,

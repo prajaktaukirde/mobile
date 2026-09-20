@@ -1,4 +1,3 @@
-import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import * as Crypto from 'expo-crypto';
 import { Platform } from 'react-native';
@@ -6,12 +5,12 @@ import { Platform } from 'react-native';
 const STORAGE_KEYS = {
   USER_PIN_HASH: 'auth_user_pin_hash',
   USER_PASSWORD_HASH: 'auth_user_password_hash',
-  BIOMETRIC_ENABLED: 'auth_biometric_enabled',
+  USER_PATTERN_HASH: 'auth_user_pattern_hash',
   IS_CONFIGURED: 'auth_is_configured',
   USER_NAME: 'auth_user_name',
 };
 
-// Web fallback memory store if SecureStore is not supported on web
+// Web fallback storage if SecureStore is running on browser
 const memoryStore: Record<string, string> = {};
 
 async function secureSet(key: string, value: string): Promise<void> {
@@ -22,7 +21,7 @@ async function secureSet(key: string, value: string): Promise<void> {
         return;
       }
     } catch {
-      // ignore web storage error
+      // ignore
     }
     memoryStore[key] = value;
     return;
@@ -37,7 +36,7 @@ async function secureGet(key: string): Promise<string | null> {
         return window.localStorage.getItem(key);
       }
     } catch {
-      // ignore web storage error
+      // ignore
     }
     return memoryStore[key] || null;
   }
@@ -60,11 +59,11 @@ async function secureDelete(key: string): Promise<void> {
   await SecureStore.deleteItemAsync(key);
 }
 
-export interface BiometricStatus {
-  hasHardware: boolean;
-  isEnrolled: boolean;
-  supportedTypes: string[];
-  primaryType: 'face' | 'fingerprint' | 'iris' | 'none';
+export interface UserAuthProfile {
+  name: string;
+  hasPin: boolean;
+  hasPassword: boolean;
+  hasPattern: boolean;
 }
 
 export class AuthService {
@@ -72,7 +71,7 @@ export class AuthService {
    * Hashes plain text using SHA-256 with a salt
    */
   static async hashValue(value: string): Promise<string> {
-    const salt = 'mobile_auth_secure_salt_v1';
+    const salt = 'mobile_auth_salt_secure_2026';
     return await Crypto.digestStringAsync(
       Crypto.CryptoDigestAlgorithm.SHA256,
       `${salt}:${value}`
@@ -80,97 +79,13 @@ export class AuthService {
   }
 
   /**
-   * Checks device biometric capabilities
-   */
-  static async checkBiometricStatus(): Promise<BiometricStatus> {
-    try {
-      const hasHardware = await LocalAuthentication.hasHardwareAsync();
-      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
-      const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
-
-      const supportedTypes: string[] = [];
-      let primaryType: 'face' | 'fingerprint' | 'iris' | 'none' = 'none';
-
-      for (const t of types) {
-        if (t === LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION) {
-          supportedTypes.push('Face Recognition');
-          if (primaryType === 'none') primaryType = 'face';
-        } else if (t === LocalAuthentication.AuthenticationType.FINGERPRINT) {
-          supportedTypes.push('Fingerprint');
-          if (primaryType === 'none' || primaryType === 'face') primaryType = 'fingerprint';
-        } else if (t === LocalAuthentication.AuthenticationType.IRIS) {
-          supportedTypes.push('Iris');
-          if (primaryType === 'none') primaryType = 'iris';
-        }
-      }
-
-      if (supportedTypes.length === 0 && hasHardware) {
-        supportedTypes.push('Biometrics');
-        primaryType = 'fingerprint';
-      }
-
-      return {
-        hasHardware,
-        isEnrolled,
-        supportedTypes,
-        primaryType,
-      };
-    } catch (error) {
-      console.warn('Error checking biometric status:', error);
-      return {
-        hasHardware: false,
-        isEnrolled: false,
-        supportedTypes: [],
-        primaryType: 'none',
-      };
-    }
-  }
-
-  /**
-   * Prompt user for Biometric Authentication
-   */
-  static async authenticateWithBiometrics(
-    promptMessage = 'Confirm your identity with biometrics'
-  ): Promise<{ success: boolean; error?: string }> {
-    try {
-      const status = await this.checkBiometricStatus();
-
-      // If no hardware or not enrolled, return appropriate message
-      if (!status.hasHardware) {
-        return { success: false, error: 'No biometric hardware detected on this device.' };
-      }
-      if (!status.isEnrolled) {
-        return { success: false, error: 'No biometric credentials enrolled in system settings.' };
-      }
-
-      const result = await LocalAuthentication.authenticateAsync({
-        promptMessage,
-        cancelLabel: 'Cancel',
-        fallbackLabel: 'Use PIN',
-        disableDeviceFallback: true,
-      });
-
-      if (result.success) {
-        return { success: true };
-      } else {
-        return {
-          success: false,
-          error: result.error ? `Authentication cancelled or failed (${result.error})` : 'Biometric authentication failed',
-        };
-      }
-    } catch (err: any) {
-      return { success: false, error: err?.message || 'Biometric authentication error' };
-    }
-  }
-
-  /**
-   * Save initial setup (Password, PIN, Biometric preference, and optional name)
+   * Save initial setup (Password, PIN, and Pattern)
    */
   static async registerCredentials(params: {
     name?: string;
     password?: string;
     pin?: string;
-    enableBiometrics?: boolean;
+    pattern?: number[];
   }): Promise<void> {
     if (params.name) {
       await secureSet(STORAGE_KEYS.USER_NAME, params.name);
@@ -183,14 +98,16 @@ export class AuthService {
       const pinHash = await this.hashValue(params.pin);
       await secureSet(STORAGE_KEYS.USER_PIN_HASH, pinHash);
     }
-    if (params.enableBiometrics !== undefined) {
-      await secureSet(STORAGE_KEYS.BIOMETRIC_ENABLED, params.enableBiometrics ? 'true' : 'false');
+    if (params.pattern && params.pattern.length > 0) {
+      const patternString = params.pattern.join('-');
+      const patternHash = await this.hashValue(patternString);
+      await secureSet(STORAGE_KEYS.USER_PATTERN_HASH, patternHash);
     }
     await secureSet(STORAGE_KEYS.IS_CONFIGURED, 'true');
   }
 
   /**
-   * Verify entered PIN
+   * Verify entered PIN (Numeric)
    */
   static async verifyPin(enteredPin: string): Promise<boolean> {
     const storedHash = await secureGet(STORAGE_KEYS.USER_PIN_HASH);
@@ -200,12 +117,23 @@ export class AuthService {
   }
 
   /**
-   * Verify entered Password
+   * Verify entered Password (Character / Alphanumeric)
    */
   static async verifyPassword(enteredPassword: string): Promise<boolean> {
     const storedHash = await secureGet(STORAGE_KEYS.USER_PASSWORD_HASH);
     if (!storedHash) return false;
     const inputHash = await this.hashValue(enteredPassword);
+    return storedHash === inputHash;
+  }
+
+  /**
+   * Verify entered Pattern (Sequence of dot indices)
+   */
+  static async verifyPattern(pattern: number[]): Promise<boolean> {
+    const storedHash = await secureGet(STORAGE_KEYS.USER_PATTERN_HASH);
+    if (!storedHash) return false;
+    const patternString = pattern.join('-');
+    const inputHash = await this.hashValue(patternString);
     return storedHash === inputHash;
   }
 
@@ -218,30 +146,15 @@ export class AuthService {
   }
 
   /**
-   * Check if biometric unlock is enabled by user
-   */
-  static async isBiometricEnabled(): Promise<boolean> {
-    const enabled = await secureGet(STORAGE_KEYS.BIOMETRIC_ENABLED);
-    return enabled === 'true';
-  }
-
-  /**
-   * Toggle biometric unlock preference
-   */
-  static async setBiometricEnabled(enabled: boolean): Promise<void> {
-    await secureSet(STORAGE_KEYS.BIOMETRIC_ENABLED, enabled ? 'true' : 'false');
-  }
-
-  /**
    * Retrieve current user profile display info
    */
-  static async getUserProfile(): Promise<{ name: string; hasPin: boolean; hasPassword: boolean; biometricEnabled: boolean }> {
+  static async getUserProfile(): Promise<UserAuthProfile> {
     const name = (await secureGet(STORAGE_KEYS.USER_NAME)) || 'User';
     const hasPin = Boolean(await secureGet(STORAGE_KEYS.USER_PIN_HASH));
     const hasPassword = Boolean(await secureGet(STORAGE_KEYS.USER_PASSWORD_HASH));
-    const biometricEnabled = (await secureGet(STORAGE_KEYS.BIOMETRIC_ENABLED)) === 'true';
+    const hasPattern = Boolean(await secureGet(STORAGE_KEYS.USER_PATTERN_HASH));
 
-    return { name, hasPin, hasPassword, biometricEnabled };
+    return { name, hasPin, hasPassword, hasPattern };
   }
 
   /**
@@ -250,7 +163,7 @@ export class AuthService {
   static async resetAll(): Promise<void> {
     await secureDelete(STORAGE_KEYS.USER_PIN_HASH);
     await secureDelete(STORAGE_KEYS.USER_PASSWORD_HASH);
-    await secureDelete(STORAGE_KEYS.BIOMETRIC_ENABLED);
+    await secureDelete(STORAGE_KEYS.USER_PATTERN_HASH);
     await secureDelete(STORAGE_KEYS.IS_CONFIGURED);
     await secureDelete(STORAGE_KEYS.USER_NAME);
   }
