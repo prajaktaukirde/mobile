@@ -1,13 +1,14 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   PanResponder,
   GestureResponderEvent,
-  PanResponderGestureState,
+  TouchableOpacity,
 } from 'react-native';
 import Svg, { Line, Circle } from 'react-native-svg';
+import { Ionicons } from '@expo/vector-icons';
 
 interface PatternLockProps {
   size?: number;
@@ -30,13 +31,21 @@ export const PatternLock: React.FC<PatternLockProps> = ({
   const [selectedDots, setSelectedDots] = useState<number[]>([]);
   const [currentTouch, setCurrentTouch] = useState<Point | null>(null);
 
-  const containerRef = useRef<View>(null);
-  const containerOffset = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  // Ref to completely prevent closure staleness and duplicate entries
+  const selectedDotsRef = useRef<number[]>([]);
+  const containerOffsetRef = useRef<{ pageX: number; pageY: number }>({ pageX: 0, pageY: 0 });
+  const containerViewRef = useRef<View>(null);
 
-  // Pre-calculate dot center coordinates
+  // Synchronize ref when external error or clear happens
+  useEffect(() => {
+    if (error) {
+      // Keep selected visible on error for visual feedback, will be cleared by parent
+    }
+  }, [error]);
+
   const step = size / 3;
-  const dotRadius = 10;
-  const hitRadius = 32;
+  const dotRadius = 11;
+  const hitRadius = 34; // Generous hit area for easy touch / mouse dragging
 
   const dotCenters: Point[] = Array.from({ length: 9 }).map((_, index) => {
     const row = Math.floor(index / 3);
@@ -58,13 +67,40 @@ export const PatternLock: React.FC<PatternLockProps> = ({
     return null;
   };
 
-  const handleTouch = (relativeX: number, relativeY: number) => {
-    if (disabled) return;
-    const hitIndex = getDotIndexFromCoords(relativeX, relativeY);
-    if (hitIndex !== null && !selectedDots.includes(hitIndex)) {
-      setSelectedDots((prev) => [...prev, hitIndex]);
+  const addDot = (dotIndex: number) => {
+    if (!selectedDotsRef.current.includes(dotIndex)) {
+      selectedDotsRef.current.push(dotIndex);
+      setSelectedDots([...selectedDotsRef.current]);
     }
-    setCurrentTouch({ x: relativeX, y: relativeY });
+  };
+
+  const clearPattern = () => {
+    selectedDotsRef.current = [];
+    setSelectedDots([]);
+    setCurrentTouch(null);
+  };
+
+  const updateContainerOffset = () => {
+    if (containerViewRef.current) {
+      containerViewRef.current.measure((_x, _y, _w, _h, pageX, pageY) => {
+        containerOffsetRef.current = { pageX: pageX || 0, pageY: pageY || 0 };
+      });
+    }
+  };
+
+  // Convert gesture event coordinates to local container coordinates
+  const getLocalCoords = (evt: GestureResponderEvent): { x: number; y: number } => {
+    const native = evt.nativeEvent as any;
+    if (typeof native.locationX === 'number' && typeof native.locationY === 'number') {
+      return { x: native.locationX, y: native.locationY };
+    }
+    // Fallback using page coordinates
+    const pageX = native.pageX ?? native.clientX ?? 0;
+    const pageY = native.pageY ?? native.clientY ?? 0;
+    return {
+      x: pageX - containerOffsetRef.current.pageX,
+      y: pageY - containerOffsetRef.current.pageY,
+    };
   };
 
   const panResponder = useRef(
@@ -74,34 +110,53 @@ export const PatternLock: React.FC<PatternLockProps> = ({
 
       onPanResponderGrant: (evt: GestureResponderEvent) => {
         if (disabled) return;
-        const { locationX, locationY } = evt.nativeEvent;
-        const hitIndex = getDotIndexFromCoords(locationX, locationY);
+        updateContainerOffset();
+        const { x, y } = getLocalCoords(evt);
+        const hitIndex = getDotIndexFromCoords(x, y);
+
+        selectedDotsRef.current = [];
         if (hitIndex !== null) {
+          selectedDotsRef.current = [hitIndex];
           setSelectedDots([hitIndex]);
-          setCurrentTouch({ x: locationX, y: locationY });
+          setCurrentTouch({ x, y });
         } else {
           setSelectedDots([]);
           setCurrentTouch(null);
         }
       },
 
-      onPanResponderMove: (evt: GestureResponderEvent, gestureState: PanResponderGestureState) => {
+      onPanResponderMove: (evt: GestureResponderEvent) => {
         if (disabled) return;
-        const { locationX, locationY } = evt.nativeEvent;
-        handleTouch(locationX, locationY);
+        const { x, y } = getLocalCoords(evt);
+        const hitIndex = getDotIndexFromCoords(x, y);
+        if (hitIndex !== null) {
+          addDot(hitIndex);
+        }
+        setCurrentTouch({ x, y });
       },
 
       onPanResponderRelease: () => {
         setCurrentTouch(null);
-        setSelectedDots((current) => {
-          if (current.length > 0) {
-            onPatternComplete(current);
-          }
-          return current;
-        });
+        const finalPattern = [...selectedDotsRef.current];
+        if (finalPattern.length > 0) {
+          onPatternComplete(finalPattern);
+        }
       },
     })
   ).current;
+
+  // Also support tapping individual dots directly
+  const handleDotTap = (index: number) => {
+    if (disabled) return;
+    addDot(index);
+  };
+
+  const handleFinishTapSelection = () => {
+    const finalPattern = [...selectedDotsRef.current];
+    if (finalPattern.length > 0) {
+      onPatternComplete(finalPattern);
+    }
+  };
 
   const lineColor = error ? '#ef4444' : '#0284c7';
   const dotActiveColor = error ? '#ef4444' : '#0284c7';
@@ -109,14 +164,15 @@ export const PatternLock: React.FC<PatternLockProps> = ({
 
   return (
     <View style={styles.wrapper}>
-      {/* 3x3 Gesture Canvas */}
+      {/* 3x3 Canvas */}
       <View
-        ref={containerRef}
+        ref={containerViewRef}
+        onLayout={updateContainerOffset}
         style={[styles.container, { width: size, height: size }]}
         {...panResponder.panHandlers}
       >
         <Svg width={size} height={size} style={StyleSheet.absoluteFill}>
-          {/* Completed Connecting Lines */}
+          {/* Connecting Lines */}
           {selectedDots.map((dotIndex, idx) => {
             if (idx === 0) return null;
             const prevDot = dotCenters[selectedDots[idx - 1]];
@@ -135,7 +191,7 @@ export const PatternLock: React.FC<PatternLockProps> = ({
             );
           })}
 
-          {/* Active drag line to current finger/cursor */}
+          {/* Active trailing line to cursor/touch */}
           {currentTouch && selectedDots.length > 0 && (
             <Line
               x1={dotCenters[selectedDots[selectedDots.length - 1]].x}
@@ -149,12 +205,11 @@ export const PatternLock: React.FC<PatternLockProps> = ({
             />
           )}
 
-          {/* 9 Grid Dots */}
+          {/* 9 Pattern Dots */}
           {dotCenters.map((center, index) => {
             const isSelected = selectedDots.includes(index);
             return (
               <React.Fragment key={`dot-${index}`}>
-                {/* Outer ring for selected dots */}
                 {isSelected && (
                   <Circle
                     cx={center.x}
@@ -165,11 +220,10 @@ export const PatternLock: React.FC<PatternLockProps> = ({
                     strokeWidth={2}
                   />
                 )}
-                {/* Core dot */}
                 <Circle
                   cx={center.x}
                   cy={center.y}
-                  r={isSelected ? dotRadius + 2 : dotRadius}
+                  r={isSelected ? dotRadius + 3 : dotRadius}
                   fill={isSelected ? dotActiveColor : dotInactiveColor}
                 />
               </React.Fragment>
@@ -178,11 +232,30 @@ export const PatternLock: React.FC<PatternLockProps> = ({
         </Svg>
       </View>
 
-      {/* Error or Help Hint */}
+      {/* Status / Error feedback */}
       {error ? (
         <Text style={styles.errorText}>{error}</Text>
       ) : (
-        <Text style={styles.hintText}>Connect at least 4 dots</Text>
+        <Text style={styles.hintText}>
+          {selectedDots.length > 0
+            ? `Connected: ${selectedDots.length} ${selectedDots.length === 1 ? 'dot' : 'dots'} (min 4)`
+            : 'Swipe or tap across at least 4 dots'}
+        </Text>
+      )}
+
+      {/* Clear & Done buttons for tap mode */}
+      {selectedDots.length > 0 && (
+        <View style={styles.actionRow}>
+          <TouchableOpacity style={styles.clearBtn} onPress={clearPattern}>
+            <Ionicons name="refresh-outline" size={16} color="#ef4444" />
+            <Text style={styles.clearBtnText}>Clear</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.submitBtn} onPress={handleFinishTapSelection}>
+            <Ionicons name="checkmark-outline" size={16} color="#ffffff" />
+            <Text style={styles.submitBtnText}>Done</Text>
+          </TouchableOpacity>
+        </View>
       )}
     </View>
   );
@@ -192,7 +265,7 @@ const styles = StyleSheet.create({
   wrapper: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 10,
+    paddingVertical: 8,
   },
   container: {
     backgroundColor: '#f8fafc',
@@ -205,21 +278,58 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 6,
     elevation: 2,
-    touchAction: 'none', // Prevents screen scrolling during swipe gesture on mobile web
+    touchAction: 'none',
+    userSelect: 'none',
   } as any,
   errorText: {
     color: '#ef4444',
     fontSize: 14,
-    fontWeight: '500',
-    marginTop: 12,
+    fontWeight: '600',
+    marginTop: 10,
     textAlign: 'center',
-    height: 20,
+    minHeight: 20,
   },
   hintText: {
     color: '#64748b',
     fontSize: 13,
-    marginTop: 12,
+    fontWeight: '500',
+    marginTop: 10,
     textAlign: 'center',
-    height: 20,
+    minHeight: 20,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    marginTop: 8,
+  },
+  clearBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fee2e2',
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    gap: 4,
+  },
+  clearBtnText: {
+    color: '#ef4444',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  submitBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0284c7',
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    gap: 4,
+  },
+  submitBtnText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -25,7 +25,22 @@ export const LockScreen: React.FC = () => {
     resetApp,
   } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<'pin' | 'pattern' | 'password'>('pin');
+  // Determine available tabs based on user's configuration
+  const availableMethods: ('pin' | 'pattern' | 'password')[] = [];
+  if (userProfile.hasPin) availableMethods.push('pin');
+  if (userProfile.hasPattern) availableMethods.push('pattern');
+  if (userProfile.hasPassword) availableMethods.push('password');
+
+  const [activeTab, setActiveTab] = useState<'pin' | 'pattern' | 'password'>(
+    availableMethods[0] || 'pin'
+  );
+
+  useEffect(() => {
+    if (availableMethods.length > 0 && !availableMethods.includes(activeTab)) {
+      setActiveTab(availableMethods[0]);
+    }
+  }, [userProfile]);
+
   const [pin, setPin] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -95,7 +110,7 @@ export const LockScreen: React.FC = () => {
   const handleForgotOrReset = () => {
     Alert.alert(
       'Reset Authentication?',
-      'If you forgot your PIN, Pattern, or Password, you can reset the app. This will clear stored credentials.',
+      'If you forgot your credentials, you can reset the app. This will clear all stored credentials.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -121,67 +136,79 @@ export const LockScreen: React.FC = () => {
             <Ionicons name="lock-closed" size={32} color="#0284c7" />
           </View>
           <Text style={styles.welcomeText}>Welcome back, {userProfile.name}</Text>
-          <Text style={styles.subtitleText}>Choose your unlock method below</Text>
+          <Text style={styles.subtitleText}>
+            {activeTab === 'pin' && 'Enter your 4-digit PIN'}
+            {activeTab === 'pattern' && 'Draw your pattern to unlock'}
+            {activeTab === 'password' && 'Enter your character password'}
+          </Text>
         </View>
 
-        {/* Method Switcher Tabs */}
-        <View style={styles.tabContainer}>
-          <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'pin' && styles.tabButtonActive]}
-            onPress={() => {
-              setActiveTab('pin');
-              setError(null);
-            }}
-          >
-            <Ionicons
-              name="keypad-outline"
-              size={18}
-              color={activeTab === 'pin' ? '#ffffff' : '#64748b'}
-            />
-            <Text style={[styles.tabButtonText, activeTab === 'pin' && styles.tabButtonTextActive]}>
-              PIN
-            </Text>
-          </TouchableOpacity>
+        {/* Method Switcher Tabs (only shown if more than 1 method is configured) */}
+        {availableMethods.length > 1 && (
+          <View style={styles.tabContainer}>
+            {userProfile.hasPin && (
+              <TouchableOpacity
+                style={[styles.tabButton, activeTab === 'pin' && styles.tabButtonActive]}
+                onPress={() => {
+                  setActiveTab('pin');
+                  setError(null);
+                }}
+              >
+                <Ionicons
+                  name="keypad-outline"
+                  size={18}
+                  color={activeTab === 'pin' ? '#ffffff' : '#64748b'}
+                />
+                <Text style={[styles.tabButtonText, activeTab === 'pin' && styles.tabButtonTextActive]}>
+                  PIN
+                </Text>
+              </TouchableOpacity>
+            )}
 
-          <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'pattern' && styles.tabButtonActive]}
-            onPress={() => {
-              setActiveTab('pattern');
-              setError(null);
-              setPatternResetKey((k) => k + 1);
-            }}
-          >
-            <Ionicons
-              name="grid-outline"
-              size={18}
-              color={activeTab === 'pattern' ? '#ffffff' : '#64748b'}
-            />
-            <Text
-              style={[styles.tabButtonText, activeTab === 'pattern' && styles.tabButtonTextActive]}
-            >
-              Pattern
-            </Text>
-          </TouchableOpacity>
+            {userProfile.hasPattern && (
+              <TouchableOpacity
+                style={[styles.tabButton, activeTab === 'pattern' && styles.tabButtonActive]}
+                onPress={() => {
+                  setActiveTab('pattern');
+                  setError(null);
+                  setPatternResetKey((k) => k + 1);
+                }}
+              >
+                <Ionicons
+                  name="grid-outline"
+                  size={18}
+                  color={activeTab === 'pattern' ? '#ffffff' : '#64748b'}
+                />
+                <Text
+                  style={[styles.tabButtonText, activeTab === 'pattern' && styles.tabButtonTextActive]}
+                >
+                  Pattern
+                </Text>
+              </TouchableOpacity>
+            )}
 
-          <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'password' && styles.tabButtonActive]}
-            onPress={() => {
-              setActiveTab('password');
-              setError(null);
-            }}
-          >
-            <Ionicons
-              name="text-outline"
-              size={18}
-              color={activeTab === 'password' ? '#ffffff' : '#64748b'}
-            />
-            <Text
-              style={[styles.tabButtonText, activeTab === 'password' && styles.tabButtonTextActive]}
-            >
-              Password
-            </Text>
-          </TouchableOpacity>
-        </View>
+            {userProfile.hasPassword && (
+              <TouchableOpacity
+                style={[styles.tabButton, activeTab === 'password' && styles.tabButtonActive]}
+                onPress={() => {
+                  setActiveTab('password');
+                  setError(null);
+                }}
+              >
+                <Ionicons
+                  name="text-outline"
+                  size={18}
+                  color={activeTab === 'password' ? '#ffffff' : '#64748b'}
+                />
+                <Text
+                  style={[styles.tabButtonText, activeTab === 'password' && styles.tabButtonTextActive]}
+                >
+                  Password
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
 
         {/* Tab 1: Numeric PIN */}
         {activeTab === 'pin' && (
@@ -214,7 +241,7 @@ export const LockScreen: React.FC = () => {
         {activeTab === 'password' && (
           <View style={styles.passwordSection}>
             <View style={styles.card}>
-              <Text style={styles.inputLabel}>Character Password</Text>
+              <Text style={styles.inputLabel}>Password</Text>
               <View style={styles.inputWrapper}>
                 <Ionicons name="lock-closed-outline" size={20} color="#64748b" style={styles.inputIcon} />
                 <TextInput

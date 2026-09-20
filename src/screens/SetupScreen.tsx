@@ -15,11 +15,26 @@ import { useAuth } from '../context/AuthContext';
 import { PinKeypad } from '../components/PinKeypad';
 import { PatternLock } from '../components/PatternLock';
 
+type SetupStage = 'CHOOSE_METHODS' | 'SETUP_PASSWORD' | 'SETUP_PIN' | 'SETUP_PATTERN';
+
 export const SetupScreen: React.FC = () => {
   const { register } = useAuth();
 
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  // Selection stage
+  const [selectedMethods, setSelectedMethods] = useState<{
+    pin: boolean;
+    pattern: boolean;
+    password: boolean;
+  }>({
+    pin: true,
+    pattern: true,
+    password: false,
+  });
+
+  const [currentStage, setCurrentStage] = useState<SetupStage>('CHOOSE_METHODS');
   const [name, setName] = useState('');
+
+  // Password state
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -34,20 +49,61 @@ export const SetupScreen: React.FC = () => {
   const [pattern, setPattern] = useState<number[]>([]);
   const [isConfirmingPattern, setIsConfirmingPattern] = useState(false);
   const [patternError, setPatternError] = useState<string | null>(null);
-  const [patternKey, setPatternKey] = useState(0); // to force reset component on retry
+  const [patternKey, setPatternKey] = useState(0);
 
-  const handleStep1Submit = () => {
+  const toggleMethod = (method: 'pin' | 'pattern' | 'password') => {
+    setSelectedMethods((prev) => ({
+      ...prev,
+      [method]: !prev[method],
+    }));
+  };
+
+  const getActiveMethodQueue = (): SetupStage[] => {
+    const queue: SetupStage[] = [];
+    if (selectedMethods.password) queue.push('SETUP_PASSWORD');
+    if (selectedMethods.pin) queue.push('SETUP_PIN');
+    if (selectedMethods.pattern) queue.push('SETUP_PATTERN');
+    return queue;
+  };
+
+  const handleStartSetup = () => {
+    const count = Object.values(selectedMethods).filter(Boolean).length;
+    if (count === 0) {
+      Alert.alert('Selection Required', 'Please select at least one authentication method to set up.');
+      return;
+    }
+    const queue = getActiveMethodQueue();
+    if (queue.length > 0) {
+      setCurrentStage(queue[0]);
+    }
+  };
+
+  const advanceFromStage = (current: SetupStage, finalPattern?: number[]) => {
+    const queue = getActiveMethodQueue();
+    const currentIndex = queue.indexOf(current);
+    if (currentIndex < queue.length - 1) {
+      // Advance to next method
+      setCurrentStage(queue[currentIndex + 1]);
+    } else {
+      // Completed all selected methods!
+      handleFinishRegistration(finalPattern);
+    }
+  };
+
+  // --- Password Handlers ---
+  const handlePasswordSubmit = () => {
     if (!password || password.length < 6) {
-      Alert.alert('Password too short', 'Password must contain at least 6 characters.');
+      Alert.alert('Password too short', 'Password must be at least 6 characters long.');
       return;
     }
     if (password !== confirmPassword) {
-      Alert.alert('Mismatch', 'Passwords do not match. Please re-type.');
+      Alert.alert('Mismatch', 'Passwords do not match. Please re-enter.');
       return;
     }
-    setStep(2);
+    advanceFromStage('SETUP_PASSWORD');
   };
 
+  // --- PIN Handlers ---
   const handlePinDigit = (digit: string) => {
     setPinError(null);
     if (!isConfirmingPin) {
@@ -66,11 +122,9 @@ export const SetupScreen: React.FC = () => {
         setConfirmedPin(nextConfirmed);
         if (nextConfirmed.length === 4) {
           if (pin === nextConfirmed) {
-            setTimeout(() => {
-              setStep(3);
-            }, 250);
+            advanceFromStage('SETUP_PIN');
           } else {
-            setPinError('PINs do not match. Try again.');
+            setPinError('PINs do not match. Please try again.');
             setTimeout(() => {
               setConfirmedPin('');
             }, 700);
@@ -89,47 +143,51 @@ export const SetupScreen: React.FC = () => {
     }
   };
 
+  // --- Pattern Handlers ---
   const handlePatternComplete = (drawnPattern: number[]) => {
     setPatternError(null);
 
     if (drawnPattern.length < 4) {
-      setPatternError('Pattern must connect at least 4 dots');
+      setPatternError('Please connect at least 4 dots.');
       setPatternKey((k) => k + 1);
       return;
     }
 
     if (!isConfirmingPattern) {
+      // Store the initial pattern and ask for confirmation
       setPattern(drawnPattern);
       setIsConfirmingPattern(true);
       setPatternKey((k) => k + 1);
     } else {
-      // Compare drawnPattern with initial pattern
-      const matches =
+      // Compare drawnPattern against the saved pattern
+      const isExactMatch =
         drawnPattern.length === pattern.length &&
-        drawnPattern.every((dot, idx) => dot === pattern[idx]);
+        drawnPattern.every((dotIndex, idx) => dotIndex === pattern[idx]);
 
-      if (matches) {
-        handleFinishAllSetup(drawnPattern);
+      if (isExactMatch) {
+        advanceFromStage('SETUP_PATTERN', drawnPattern);
       } else {
-        setPatternError('Pattern does not match. Draw your pattern again.');
+        setPatternError('Pattern did not match. Please draw your pattern again.');
         setPatternKey((k) => k + 1);
       }
     }
   };
 
-  const handleFinishAllSetup = async (finalPattern: number[]) => {
+  const handleFinishRegistration = async (finalPattern?: number[]) => {
     try {
       await register({
         name: name.trim() || 'User',
-        password,
-        pin,
-        pattern: finalPattern,
+        password: selectedMethods.password ? password : undefined,
+        pin: selectedMethods.pin ? pin : undefined,
+        pattern: selectedMethods.pattern ? finalPattern || pattern : undefined,
       });
-      Alert.alert('Success', 'PIN, Password, and Pattern Lock configured successfully!');
+      Alert.alert('Success', 'Your security setup is complete!');
     } catch (err: any) {
-      Alert.alert('Error', err?.message || 'Failed to save security settings.');
+      Alert.alert('Error', err?.message || 'Failed to save credentials.');
     }
   };
+
+  const selectedCount = Object.values(selectedMethods).filter(Boolean).length;
 
   return (
     <KeyboardAvoidingView
@@ -140,26 +198,26 @@ export const SetupScreen: React.FC = () => {
         {/* Header */}
         <View style={styles.headerContainer}>
           <View style={styles.iconCircle}>
-            <Ionicons name="shield-checkmark" size={40} color="#0284c7" />
+            <Ionicons name="shield-checkmark" size={38} color="#0284c7" />
           </View>
-          <Text style={styles.title}>Security Setup</Text>
+          <Text style={styles.title}>
+            {currentStage === 'CHOOSE_METHODS' && 'Choose Auth Methods'}
+            {currentStage === 'SETUP_PASSWORD' && 'Character Password'}
+            {currentStage === 'SETUP_PIN' && 'Numeric 4-Digit PIN'}
+            {currentStage === 'SETUP_PATTERN' && 'Pattern Lock Setup'}
+          </Text>
           <Text style={styles.subtitle}>
-            {step === 1 && 'Step 1 of 3: Character Password (alphanumeric)'}
-            {step === 2 && 'Step 2 of 3: Numeric 4-digit PIN'}
-            {step === 3 && 'Step 3 of 3: 3x3 Grid Pattern Lock'}
+            {currentStage === 'CHOOSE_METHODS' && 'Select the security method(s) you would like to enable:'}
+            {currentStage === 'SETUP_PASSWORD' && 'Create an alphanumeric password for your account'}
+            {currentStage === 'SETUP_PIN' && 'Set up a quick numeric dial PIN'}
+            {currentStage === 'SETUP_PATTERN' && 'Connect dots on the 3x3 grid'}
           </Text>
         </View>
 
-        {/* Step Indicator */}
-        <View style={styles.stepIndicator}>
-          <View style={[styles.stepBar, step >= 1 && styles.stepBarActive]} />
-          <View style={[styles.stepBar, step >= 2 && styles.stepBarActive]} />
-          <View style={[styles.stepBar, step >= 3 && styles.stepBarActive]} />
-        </View>
-
-        {/* STEP 1: Name & Password (Characters) */}
-        {step === 1 && (
+        {/* STAGE 0: CHOOSE METHODS */}
+        {currentStage === 'CHOOSE_METHODS' && (
           <View style={styles.card}>
+            {/* Optional name */}
             <Text style={styles.inputLabel}>Your Name (Optional)</Text>
             <View style={styles.inputWrapper}>
               <Ionicons name="person-outline" size={20} color="#64748b" style={styles.inputIcon} />
@@ -172,12 +230,91 @@ export const SetupScreen: React.FC = () => {
               />
             </View>
 
-            <Text style={styles.inputLabel}>Character Password (min 6 chars)</Text>
+            <Text style={[styles.inputLabel, { marginTop: 16 }]}>Select Methods to Set Up</Text>
+
+            {/* Option 1: Numeric PIN */}
+            <TouchableOpacity
+              style={[styles.methodOption, selectedMethods.pin && styles.methodOptionSelected]}
+              onPress={() => toggleMethod('pin')}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.methodIconWrap, { backgroundColor: '#f0f9ff' }]}>
+                <Ionicons name="keypad" size={24} color="#0284c7" />
+              </View>
+              <View style={{ flex: 1, paddingHorizontal: 12 }}>
+                <Text style={styles.methodOptionTitle}>Numeric PIN</Text>
+                <Text style={styles.methodOptionDesc}>4-digit numeric keypad code for quick unlock</Text>
+              </View>
+              <Ionicons
+                name={selectedMethods.pin ? 'checkbox' : 'square-outline'}
+                size={24}
+                color={selectedMethods.pin ? '#0284c7' : '#94a3b8'}
+              />
+            </TouchableOpacity>
+
+            {/* Option 2: Pattern Lock */}
+            <TouchableOpacity
+              style={[styles.methodOption, selectedMethods.pattern && styles.methodOptionSelected]}
+              onPress={() => toggleMethod('pattern')}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.methodIconWrap, { backgroundColor: '#ecfdf5' }]}>
+                <Ionicons name="grid" size={24} color="#10b981" />
+              </View>
+              <View style={{ flex: 1, paddingHorizontal: 12 }}>
+                <Text style={styles.methodOptionTitle}>Pattern Lock</Text>
+                <Text style={styles.methodOptionDesc}>3x3 grid connect-the-dots swipe gesture</Text>
+              </View>
+              <Ionicons
+                name={selectedMethods.pattern ? 'checkbox' : 'square-outline'}
+                size={24}
+                color={selectedMethods.pattern ? '#10b981' : '#94a3b8'}
+              />
+            </TouchableOpacity>
+
+            {/* Option 3: Character Password */}
+            <TouchableOpacity
+              style={[styles.methodOption, selectedMethods.password && styles.methodOptionSelected]}
+              onPress={() => toggleMethod('password')}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.methodIconWrap, { backgroundColor: '#f5f3ff' }]}>
+                <Ionicons name="text" size={24} color="#8b5cf6" />
+              </View>
+              <View style={{ flex: 1, paddingHorizontal: 12 }}>
+                <Text style={styles.methodOptionTitle}>Character Password</Text>
+                <Text style={styles.methodOptionDesc}>Alphanumeric password (letters, digits, symbols)</Text>
+              </View>
+              <Ionicons
+                name={selectedMethods.password ? 'checkbox' : 'square-outline'}
+                size={24}
+                color={selectedMethods.password ? '#8b5cf6' : '#94a3b8'}
+              />
+            </TouchableOpacity>
+
+            {/* Continue Button */}
+            <TouchableOpacity
+              style={[styles.primaryButton, selectedCount === 0 && styles.buttonDisabled]}
+              onPress={handleStartSetup}
+              disabled={selectedCount === 0}
+            >
+              <Text style={styles.primaryButtonText}>
+                Continue Setup ({selectedCount} Selected)
+              </Text>
+              <Ionicons name="arrow-forward" size={18} color="#ffffff" />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* STAGE: SETUP PASSWORD */}
+        {currentStage === 'SETUP_PASSWORD' && (
+          <View style={styles.card}>
+            <Text style={styles.inputLabel}>Master Password (min 6 characters)</Text>
             <View style={styles.inputWrapper}>
               <Ionicons name="lock-closed-outline" size={20} color="#64748b" style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
-                placeholder="Letters, numbers & symbols"
+                placeholder="Enter password"
                 placeholderTextColor="#94a3b8"
                 secureTextEntry={!showPassword}
                 value={password}
@@ -205,18 +342,26 @@ export const SetupScreen: React.FC = () => {
               />
             </View>
 
-            <TouchableOpacity style={styles.primaryButton} onPress={handleStep1Submit}>
-              <Text style={styles.primaryButtonText}>Continue to Numeric PIN</Text>
+            <TouchableOpacity style={styles.primaryButton} onPress={handlePasswordSubmit}>
+              <Text style={styles.primaryButtonText}>Save & Continue</Text>
               <Ionicons name="arrow-forward" size={18} color="#ffffff" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={() => setCurrentStage('CHOOSE_METHODS')}
+            >
+              <Ionicons name="arrow-back" size={18} color="#475569" />
+              <Text style={styles.secondaryButtonText}>Back to Method Selection</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* STEP 2: Numeric PIN */}
-        {step === 2 && (
+        {/* STAGE: SETUP PIN */}
+        {currentStage === 'SETUP_PIN' && (
           <View style={styles.card}>
             <Text style={styles.pinInstruction}>
-              {isConfirmingPin ? 'Confirm your 4-digit PIN' : 'Enter a 4-digit Numeric PIN'}
+              {isConfirmingPin ? 'Confirm your 4-digit PIN' : 'Enter a 4-digit PIN'}
             </Text>
 
             <PinKeypad
@@ -243,31 +388,26 @@ export const SetupScreen: React.FC = () => {
 
             <TouchableOpacity
               style={styles.secondaryButton}
-              onPress={() => {
-                setStep(1);
-                setIsConfirmingPin(false);
-                setPin('');
-                setConfirmedPin('');
-              }}
+              onPress={() => setCurrentStage('CHOOSE_METHODS')}
             >
               <Ionicons name="arrow-back" size={18} color="#475569" />
-              <Text style={styles.secondaryButtonText}>Back to Password</Text>
+              <Text style={styles.secondaryButtonText}>Back to Method Selection</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* STEP 3: Pattern Lock */}
-        {step === 3 && (
+        {/* STAGE: SETUP PATTERN */}
+        {currentStage === 'SETUP_PATTERN' && (
           <View style={styles.card}>
             <Text style={styles.pinInstruction}>
               {isConfirmingPattern
                 ? 'Confirm Pattern (draw again)'
-                : 'Draw a Pattern (connect dots)'}
+                : 'Draw Pattern (connect at least 4 dots)'}
             </Text>
             <Text style={styles.patternSubhint}>
               {isConfirmingPattern
-                ? 'Draw the exact same pattern to confirm'
-                : 'Swipe across 4 or more dots to create your pattern'}
+                ? 'Connect the exact same dots in the same order'
+                : 'Swipe or tap across 4 or more dots to form a shape'}
             </Text>
 
             <PatternLock
@@ -287,13 +427,16 @@ export const SetupScreen: React.FC = () => {
                   setPatternKey((k) => k + 1);
                 }}
               >
-                <Text style={styles.textButtonLabel}>Start Pattern Over</Text>
+                <Text style={styles.textButtonLabel}>Redo Initial Pattern</Text>
               </TouchableOpacity>
             )}
 
-            <TouchableOpacity style={styles.secondaryButton} onPress={() => setStep(2)}>
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={() => setCurrentStage('CHOOSE_METHODS')}
+            >
               <Ionicons name="arrow-back" size={18} color="#475569" />
-              <Text style={styles.secondaryButtonText}>Back to PIN</Text>
+              <Text style={styles.secondaryButtonText}>Back to Method Selection</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -336,22 +479,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#64748b',
     textAlign: 'center',
-  },
-  stepIndicator: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 20,
-  },
-  stepBar: {
-    width: 48,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#cbd5e1',
-  },
-  stepBarActive: {
-    backgroundColor: '#0284c7',
+    paddingHorizontal: 16,
   },
   card: {
     backgroundColor: '#ffffff',
@@ -367,8 +495,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#334155',
-    marginBottom: 6,
-    marginTop: 10,
+    marginBottom: 8,
   },
   inputWrapper: {
     flexDirection: 'row',
@@ -379,7 +506,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 12,
     height: 48,
-    marginBottom: 8,
+    marginBottom: 12,
   },
   inputIcon: {
     marginRight: 8,
@@ -389,6 +516,38 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#0f172a',
   },
+  methodOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+    borderWidth: 1.5,
+    borderColor: '#e2e8f0',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+  },
+  methodOptionSelected: {
+    borderColor: '#0284c7',
+    backgroundColor: '#f0f9ff',
+  },
+  methodIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  methodOptionTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#0f172a',
+    marginBottom: 2,
+  },
+  methodOptionDesc: {
+    fontSize: 12,
+    color: '#64748b',
+    lineHeight: 16,
+  },
   primaryButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -396,8 +555,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#0284c7',
     paddingVertical: 14,
     borderRadius: 10,
-    marginTop: 20,
+    marginTop: 12,
     gap: 8,
+  },
+  buttonDisabled: {
+    backgroundColor: '#94a3b8',
   },
   primaryButtonText: {
     color: '#ffffff',
